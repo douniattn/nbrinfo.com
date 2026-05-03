@@ -1,0 +1,32 @@
+name: Update Nordschleife Status
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch and parse Nordschleife status
+        run: |
+          curl -sL --max-time 15 "https://nuerburgring.de/open-hours" -o /tmp/nbr.html || true
+          python3 .github/parse_status.py /tmp/nbr.html assets/status.json
+
+      - name: Commit status update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/status.json
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Update track status [auto]"
+            git push
+          fi

@@ -1189,46 +1189,18 @@
      §4. TRACK STATUS — Fetch from nuerburgring.de
      ────────────────────────────────────────────────────── */
   async function fetchTrackStatus() {
-    const frame = document.getElementById('status-frame');
-    const banner = document.getElementById('status-banner');
-    const statusText = document.getElementById('status-text');
-    const statusCard = document.getElementById('status-card');
-    const statusIcon = document.getElementById('status-icon');
-    const statusLabel = document.getElementById('status-label');
-    const statusDetail = document.getElementById('status-detail');
-    const statusTime = document.getElementById('status-time');
-
     try {
-      // Try CORS proxy to fetch nuerburgring.de/open-hours
-      // In production, you'd use your own proxy or server-side scrape.
-      // For GitHub Pages, we use allorigins as a CORS proxy.
-      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://nuerburgring.de/open-hours');
-      const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-      const html = await resp.text();
-
-      // Parse the HTML for status indicators
-      let status = 'unknown';
-      const lower = html.toLowerCase();
-
-      if (lower.includes('geöffnet') || lower.includes('open') || lower.includes('status-open') ||
-          lower.includes('bg-green') || lower.includes('color: green') || lower.includes('ampel-gruen')) {
-        status = 'open';
-      } else if (lower.includes('eingeschränkt') || lower.includes('limited') || lower.includes('teilweise') ||
-                 lower.includes('bg-yellow') || lower.includes('ampel-gelb')) {
-        status = 'limited';
-      } else if (lower.includes('geschlossen') || lower.includes('closed') || lower.includes('gesperrt') ||
-                 lower.includes('bg-red') || lower.includes('ampel-rot')) {
-        status = 'closed';
-      }
-
-      applyStatus(status);
+      // Read status from assets/status.json (updated every 10min by GitHub Actions)
+      const resp = await fetch('assets/status.json?t=' + Date.now(), { signal: AbortSignal.timeout(5000) });
+      const data = await resp.json();
+      applyStatus(data.status, data.detail, data.time, data.periods || []);
     } catch (err) {
       console.warn('Status fetch failed:', err);
       applyStatus('unknown');
     }
   }
 
-  function applyStatus(status) {
+  function applyStatus(status, detail, fetchTime, periods) {
     const frame = document.getElementById('status-frame');
     const banner = document.getElementById('status-banner');
     const statusText = document.getElementById('status-text');
@@ -1242,35 +1214,37 @@
     frame.className = '';
     statusCard.className = 'bg-racing-card border-2 rounded-xl p-8 text-center transition-all duration-500';
 
+    const detailText = detail || '';
+
     switch (status) {
       case 'open':
         frame.classList.add('open');
         banner.className = 'w-full text-center text-sm font-semibold py-1.5 px-4 bg-green-900/40 text-green-400 z-50 relative';
-        statusText.innerHTML = '🟢 Nordschleife is <strong>OPEN</strong> for Touristenfahrten';
+        statusText.innerHTML = '🟢 Nordschleife is <strong>OPEN</strong>' + (detailText ? ' — ' + detailText : '');
         statusIcon.textContent = '🟢';
         statusLabel.textContent = 'OPEN';
         statusLabel.className = 'text-3xl font-black mb-2 text-green-400';
-        statusDetail.textContent = 'Track is open for public driving (Touristenfahrten)';
+        statusDetail.textContent = detailText || 'Track is open for public driving (Touristenfahrten)';
         statusCard.classList.add('border-green-500/50');
         break;
       case 'limited':
         frame.classList.add('limited');
         banner.className = 'w-full text-center text-sm font-semibold py-1.5 px-4 bg-yellow-900/40 text-yellow-400 z-50 relative';
-        statusText.innerHTML = '🟡 Nordschleife is <strong>LIMITED</strong>';
+        statusText.innerHTML = '🟡 Nordschleife is <strong>LIMITED</strong>' + (detailText ? ' — ' + detailText : '');
         statusIcon.textContent = '🟡';
         statusLabel.textContent = 'LIMITED';
         statusLabel.className = 'text-3xl font-black mb-2 text-yellow-400';
-        statusDetail.textContent = 'Track is partially open — conditions may apply';
+        statusDetail.textContent = detailText || 'Track is partially open — conditions may apply';
         statusCard.classList.add('border-yellow-500/50');
         break;
       case 'closed':
         frame.classList.add('closed');
         banner.className = 'w-full text-center text-sm font-semibold py-1.5 px-4 bg-neutral-800 text-neutral-400 z-50 relative';
-        statusText.innerHTML = '🔴 Nordschleife is <strong>CLOSED</strong>';
+        statusText.innerHTML = '🔴 Nordschleife is <strong>CLOSED</strong>' + (detailText ? ' — ' + detailText : '');
         statusIcon.textContent = '🔴';
         statusLabel.textContent = 'CLOSED';
         statusLabel.className = 'text-3xl font-black mb-2 text-red-400';
-        statusDetail.textContent = 'Track is closed (accident, weather, or event)';
+        statusDetail.textContent = detailText || 'Track is closed (accident, weather, or event)';
         statusCard.classList.add('border-neutral-700');
         break;
       default:
@@ -1284,7 +1258,8 @@
         statusCard.classList.add('border-neutral-700');
     }
 
-    statusTime.textContent = 'Last checked: ' + now;
+    const timeStr = fetchTime ? new Date(fetchTime).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : now;
+    statusTime.textContent = 'Last updated: ' + timeStr + ' (checked at ' + now + ')';
   }
 
   // Fetch on load + every 5 minutes
