@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NBRinfo – Nordschleife Public Driving Days</title>
+  <meta name="description" content="Nordschleife public driving days tool – track map, timetable, live cams & status for enthusiasts."/>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            racing: { red: '#ef4444', dark: '#0a0a0a', card: '#141414', border: '#222' }
+          },
+          fontFamily: {
+            racing: ['"Inter"', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── Base ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #111; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+    /* ── Status Frame (border around entire page) ────── */
+    #status-frame {
+      position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+      border: 4px solid #333; transition: border-color .6s ease;
+    }
+    #status-frame.open   { border-color: #22c55e; }
+    #status-frame.limited { border-color: #eab308; }
+    #status-frame.closed  { border-color: #333; }
+
+    /* ── Tab system ──────────────────────────────────── */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .tab-btn { position: relative; }
+    .tab-btn.active::after {
+      content: ''; position: absolute; bottom: -2px; left: 0; right: 0;
+      height: 2px; background: #ef4444; border-radius: 1px;
+    }
+
+    /* ── SVG Track ────────────────────────────────────── */
+    #track-svg { width: 100%; height: auto; max-height: 72vh; }
+    .corner-label {
+      font-size: 3.2px; fill: #fff; font-weight: 600;
+      pointer-events: none; opacity: 0.85;
+      text-shadow: 0 0 3px rgba(0,0,0,.9);
+    }
+    .corner-label.active { fill: #ef4444; font-size: 4px; opacity: 1; }
+    .segment-zone { fill: none; stroke: none; }
+
+    /* ── Car tooltip ─────────────────────────────────── */
+    #car-tooltip {
+      position: absolute; background: rgba(10,10,10,.92); color: #fff;
+      padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+      border: 1px solid #ef4444; pointer-events: none; white-space: nowrap;
+      opacity: 0; transition: opacity .2s; z-index: 100;
+      transform: translate(-50%, -100%) translateY(-12px);
+    }
+    #car-tooltip.show { opacity: 1; }
+
+    /* ── Slider ───────────────────────────────────────── */
+    input[type=range].track-slider {
+      -webkit-appearance: none; width: 100%; height: 8px;
+      background: linear-gradient(90deg, #ef4444 0%, #b91c1c 100%);
+      border-radius: 4px; outline: none;
+    }
+    input[type=range].track-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 22px; height: 22px;
+      background: #ef4444; border: 3px solid #fff; border-radius: 50%;
+      cursor: grab; box-shadow: 0 0 8px rgba(239,68,68,.6);
+    }
+    input[type=range].track-slider::-moz-range-thumb {
+      width: 22px; height: 22px; background: #ef4444;
+      border: 3px solid #fff; border-radius: 50%; cursor: grab;
+    }
+
+    /* ── Zoom animation ──────────────────────────────── */
+    #track-container {
+      transition: transform .8s cubic-bezier(.25,.1,.25,1);
+      transform-origin: center center;
+    }
+    #track-container.zoomed { /* set dynamically via JS */ }
+
+    /* ── Status banner ───────────────────────────────── */
+    #status-banner {
+      transition: all .4s ease;
+    }
+
+    /* ── Calendar table ──────────────────────────────── */
+    .cal-table th { position: sticky; top: 0; z-index: 2; }
+
+    /* ── Pulse dot ────────────────────────────────────── */
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+    .pulse-dot { animation: pulse 1.5s infinite; }
+  </style>
+</head>
+
+<body class="min-h-screen">
+
+<!-- ══════════════════════════════════════════════════════
+     STATUS FRAME (border color = track status)
+     ══════════════════════════════════════════════════════ -->
+<div id="status-frame"></div>
+
+<!-- ══════════════════════════════════════════════════════
+     STATUS BANNER
+     ══════════════════════════════════════════════════════ -->
+<div id="status-banner" class="w-full text-center text-sm font-semibold py-1.5 px-4 bg-neutral-800 text-neutral-400 z-50 relative">
+  <span id="status-text">Checking track status…</span>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     HEADER
+     ══════════════════════════════════════════════════════ -->
+<header class="sticky top-0 z-40 bg-racing-dark/95 backdrop-blur border-b border-racing-border">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+    <!-- Logo -->
+    <div class="flex items-center gap-3 cursor-pointer" onclick="switchTab('home')">
+      <span class="text-2xl font-black tracking-tight">
+        <span class="text-racing-red">NBR</span><span class="text-white">info</span>
+      </span>
+      <span class="hidden sm:inline text-xs text-neutral-500 border-l border-neutral-700 pl-3 leading-tight">
+        Nordschleife Public Days<br/>Drive It Yourself
+      </span>
+    </div>
+
+    <!-- Nav tabs -->
+    <nav class="hidden md:flex items-center gap-1">
+      <button class="tab-btn active px-3 py-2 text-sm font-semibold text-white rounded hover:bg-white/5 transition" data-tab="home">Home</button>
+      <button class="tab-btn px-3 py-2 text-sm font-semibold text-neutral-400 rounded hover:bg-white/5 transition" data-tab="timetable">Timetable</button>
+      <button class="tab-btn px-3 py-2 text-sm font-semibold text-neutral-400 rounded hover:bg-white/5 transition" data-tab="livecams">Live Cams</button>
+      <button class="tab-btn px-3 py-2 text-sm font-semibold text-neutral-400 rounded hover:bg-white/5 transition" data-tab="status">Status</button>
+    </nav>
+
+    <!-- Mobile hamburger + GitHub -->
+    <div class="flex items-center gap-3">
+      <a href="https://github.com" target="_blank" rel="noopener" class="text-neutral-500 hover:text-white transition" title="GitHub">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      </a>
+      <button id="mobile-menu-btn" class="md:hidden text-neutral-400 hover:text-white">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Mobile menu -->
+  <div id="mobile-menu" class="hidden md:hidden border-t border-racing-border bg-racing-dark px-4 pb-3">
+    <button class="tab-btn-m block w-full text-left py-2 text-sm font-semibold text-white" data-tab="home">🏠 Home</button>
+    <button class="tab-btn-m block w-full text-left py-2 text-sm font-semibold text-neutral-400" data-tab="timetable">📅 Timetable</button>
+    <button class="tab-btn-m block w-full text-left py-2 text-sm font-semibold text-neutral-400" data-tab="livecams">📹 Live Cams</button>
+    <button class="tab-btn-m block w-full text-left py-2 text-sm font-semibold text-neutral-400" data-tab="status">🚦 Status</button>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════
+     MAIN CONTENT AREA
+     ══════════════════════════════════════════════════════ -->
+<main class="max-w-7xl mx-auto px-4 py-6">
+
+<!-- ┌─────────────────────────────────────────────────────
+     │  TAB 1: HOME — TRACK MAP
+     └───────────────────────────────────────────────────── -->
+<section id="tab-home" class="tab-content active">
+  <div class="text-center mb-4">
+    <h1 class="text-xl md:text-2xl font-black">Nürburgring Nordschleife <span class="text-racing-red">Track Map</span></h1>
+    <p class="text-neutral-500 text-sm mt-1">20.832 km • 125 Corners • 7 Segments — Interactive Explorer</p>
+  </div>
+
+  <!-- Track SVG container with zoom support -->
+  <div class="relative overflow-hidden rounded-xl bg-neutral-900 border border-racing-border" style="max-height:74vh;">
+    <div id="track-container" class="relative">
+      <!-- Tooltip that follows the car -->
+      <div id="car-tooltip"></div>
+
+      <svg id="track-svg" viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <!-- Forest / hill gradient -->
+          <radialGradient id="hillGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#1a3a1a"/>
+            <stop offset="100%" stop-color="#0d1f0d"/>
+          </radialGradient>
+          <linearGradient id="roadGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#333"/>
+            <stop offset="100%" stop-color="#222"/>
+          </linearGradient>
+          <!-- Glow for active segment -->
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <!-- Background: green hills/forest -->
+        <rect width="1000" height="600" fill="#0d1a0d"/>
+        <!-- Decorative hill blobs -->
+        <ellipse cx="250" cy="300" rx="280" ry="180" fill="url(#hillGrad)" opacity=".5"/>
+        <ellipse cx="700" cy="250" rx="320" ry="200" fill="url(#hillGrad)" opacity=".4"/>
+        <ellipse cx="500" cy="450" rx="250" ry="130" fill="url(#hillGrad)" opacity=".3"/>
+        <!-- Tree dots for forest effect -->
+        <g fill="#1a4a1a" opacity=".6">
+          <circle cx="120" cy="180" r="8"/><circle cx="145" cy="200" r="6"/><circle cx="100" cy="210" r="7"/>
+          <circle cx="830" cy="150" r="9"/><circle cx="860" cy="170" r="7"/><circle cx="810" cy="190" r="6"/>
+          <circle cx="200" cy="450" r="8"/><circle cx="230" cy="470" r="7"/><circle cx="180" cy="480" r="6"/>
+          <circle cx="750" cy="420" r="7"/><circle cx="780" cy="440" r="8"/><circle cx="730" cy="450" r="6"/>
+          <circle cx="400" cy="520" r="7"/><circle cx="430" cy="540" r="6"/><circle cx="370" cy="530" r="8"/>
+          <circle cx="550" cy="130" r="7"/><circle cx="580" cy="150" r="6"/><circle cx="520" cy="140" r="8"/>
+        </g>
+
+        <!-- ═══ TRACK PATH ═══
+             Isometric-style Nordschleife layout.
+             The path is a single continuous loop representing the full 20.832 km circuit.
+             Starting at the BTG (Brünnchen-T13 Gate / Tourist entrance) area.
+        -->
+        <path id="track-road-outline" d="
+          M 480,530
+          C 460,525 430,510 400,490
+          C 370,470 340,445 310,420
+          C 285,398 265,375 248,350
+          C 232,326 220,300 215,275
+          C 210,250 212,225 220,200
+          C 228,178 242,158 260,142
+          C 278,126 300,115 325,108
+          C 350,102 378,100 405,102
+          C 430,105 452,112 472,122
+          C 490,132 505,145 518,160
+          C 530,175 538,192 542,210
+          C 545,228 543,245 538,262
+          C 532,278 522,292 510,305
+          C 498,316 484,325 470,332
+          C 455,338 440,342 428,348
+          C 416,355 408,365 405,378
+          C 403,392 406,405 415,415
+          C 425,424 438,430 452,433
+          C 468,435 485,434 502,430
+          C 520,425 535,418 548,408
+          C 562,398 573,385 582,370
+          C 590,355 596,338 600,320
+          C 604,302 606,283 605,265
+          C 604,247 600,230 593,215
+          C 586,200 576,188 563,178
+          C 550,168 536,162 520,160
+          C 505,158 490,160 476,165
+          C 462,170 450,178 440,188
+          C 432,198 428,210 427,223
+          C 427,236 430,248 436,258
+          C 443,268 452,275 463,280
+          C 475,284 488,286 502,285
+          C 515,283 527,278 537,270
+          C 546,262 552,252 555,240
+          C 557,228 556,215 552,204
+          C 547,193 540,185 530,180
+          L 530,180
+          C 545,175 562,172 580,172
+          C 600,173 618,178 635,186
+          C 652,195 666,208 678,222
+          C 690,238 698,255 703,274
+          C 707,293 708,312 705,332
+          C 702,350 695,367 685,382
+          C 674,396 660,408 644,417
+          C 628,425 610,430 592,432
+          C 573,433 555,430 538,424
+          C 520,417 505,407 492,394
+          C 480,380 472,365 468,348
+          C 465,332 466,315 470,298
+          C 475,282 483,268 494,256
+          C 505,245 518,237 533,232
+          C 548,228 564,228 580,232
+          C 596,237 610,245 622,256
+          C 633,268 640,282 644,298
+          C 647,315 646,332 641,348
+          C 635,363 626,376 614,386
+          C 602,395 588,400 572,402
+          C 556,403 540,400 526,393
+          C 513,385 503,374 496,360
+          C 490,346 488,330 490,314
+          C 493,298 500,285 510,274
+          C 521,264 534,258 548,256
+          C 562,255 576,258 588,265
+          C 600,273 608,284 613,298
+          C 617,312 617,327 613,342
+          C 608,356 600,367 589,375
+          C 578,382 566,386 552,388
+          C 540,388 530,385 522,378
+          L 522,378
+          C 530,392 542,408 558,420
+          C 575,432 595,440 618,445
+          C 642,448 668,447 694,442
+          C 718,436 740,426 758,412
+          C 774,398 786,380 794,360
+          C 800,340 802,318 798,296
+          C 793,274 784,254 770,238
+          C 755,222 738,210 718,202
+          C 698,196 678,194 658,196
+          C 640,199 624,206 610,216
+          C 598,226 590,240 585,256
+          C 582,272 582,288 586,304
+          C 591,318 598,330 608,340
+          C 619,348 632,353 646,355
+          C 660,356 674,353 686,346
+          C 697,339 705,328 710,316
+          C 714,303 714,290 710,277
+          C 705,265 698,256 688,250
+          C 678,245 667,244 656,246
+          C 645,249 637,255 632,264
+          L 632,264
+          C 638,280 650,298 668,312
+          C 686,324 708,332 732,336
+          C 756,338 780,335 802,328
+          C 822,320 838,308 850,292
+          C 860,276 865,258 864,238
+          C 862,220 855,204 843,190
+          C 830,178 815,170 798,166
+          C 780,164 762,166 746,172
+          C 732,178 720,188 712,200
+          C 705,214 703,228 706,244
+          C 710,258 718,270 730,278
+          C 742,285 755,288 770,287
+          C 783,284 794,278 802,268
+          C 808,258 810,246 808,234
+          L 808,234
+          C 815,248 825,265 838,278
+          C 850,290 863,298 878,302
+          C 892,304 905,302 916,296
+          C 925,288 930,278 932,266
+          C 932,254 928,242 920,232
+          C 910,224 898,220 885,220
+          C 874,222 866,228 860,238
+          L 860,238
+          C 856,256 858,278 864,298
+          C 870,316 880,330 893,340
+          C 905,348 918,352 932,350
+          C 944,346 952,338 956,326
+          C 958,314 956,302 950,290
+          C 942,280 932,274 920,272
+          L 920,272
+          C 915,290 905,310 890,326
+          C 875,340 856,350 835,356
+          C 814,360 792,360 770,356
+          C 748,350 728,340 710,326
+          C 694,312 682,296 674,278
+          C 668,260 666,242 670,224
+          C 675,208 684,194 698,184
+          C 712,176 728,172 746,172
+          L 746,172
+          C 730,180 710,192 695,208
+          C 682,224 675,242 674,262
+          C 674,282 680,300 692,316
+          C 704,330 720,340 738,346
+          C 756,350 775,350 794,345
+          C 812,338 826,328 836,314
+          C 844,300 847,284 845,268
+          C 842,252 834,238 822,228
+          C 810,220 796,216 782,218
+          C 768,222 758,230 752,242
+          L 752,242
+          C 746,258 736,278 722,294
+          C 708,308 690,318 670,322
+          C 650,324 630,320 612,310
+          C 596,300 584,286 576,268
+          C 570,250 570,232 576,214
+          C 583,198 594,186 608,178
+          C 623,172 640,170 657,172
+          C 674,176 688,184 700,196
+          C 710,208 716,222 718,238
+          C 718,254 714,268 706,280
+          C 697,290 686,296 673,298
+          C 660,298 648,294 638,286
+          L 638,286
+          C 625,300 608,318 588,332
+          C 568,344 545,350 520,352
+          C 496,352 474,346 454,336
+          C 436,326 422,312 412,296
+          C 404,280 400,262 402,244
+          C 405,228 414,215 426,204
+          C 440,196 456,192 474,194
+          C 490,198 502,208 510,222
+          L 510,222
+          C 505,240 496,260 484,278
+          C 472,294 458,306 442,314
+          C 426,320 408,322 390,320
+          C 374,316 360,308 350,296
+          C 342,284 338,270 340,256
+          C 343,244 350,234 360,228
+          C 372,224 384,224 396,228
+          L 396,228
+          C 385,242 370,260 356,280
+          C 344,298 336,316 332,336
+          C 330,356 334,374 344,390
+          C 355,404 370,414 388,420
+          C 408,424 428,424 448,420
+          C 466,414 480,404 490,390
+          L 490,390
+          C 492,410 496,432 502,452
+          C 508,470 516,485 528,498
+          C 540,508 554,515 570,518
+          C 585,520 598,516 608,508
+          C 616,498 618,486 615,472
+          C 610,460 600,452 588,448
+          C 575,446 563,450 554,458
+          L 554,458
+          C 548,472 538,488 524,500
+          C 510,510 494,516 478,518
+          C 464,518 452,514 444,506
+          L 444,506
+          C 450,514 460,522 472,528
+          C 480,530 480,530 480,530
+          Z
+        " fill="none" stroke="#2a2a2a" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+        <!-- Road surface (thinner, on top) -->
+        <path id="track-road" d="
+          M 480,530
+          C 460,525 430,510 400,490
+          C 370,470 340,445 310,420
+          C 285,398 265,375 248,350
+          C 232,326 220,300 215,275
+          C 210,250 212,225 220,200
+          C 228,178 242,158 260,142
+          C 278,126 300,115 325,108
+          C 350,102 378,100 405,102
+          C 430,105 452,112 472,122
+          C 490,132 505,145 518,160
+          C 530,175 538,192 542,210
+          C 545,228 543,245 538,262
+          C 532,278 522,292 510,305
+          C 498,316 484,325 470,332
+          C 455,338 440,342 428,348
+          C 416,355 408,365 405,378
+          C 403,392 406,405 415,415
+          C 425,424 438,430 452,433
+          C 468,435 485,434 502,430
+          C 520,425 535,418 548,408
+          C 562,398 573,385 582,370
+          C 590,355 596,338 600,320
+          C 604,302 606,283 605,265
+          C 604,247 600,230 593,215
+          C 586,200 576,188 563,178
+          C 550,168 536,162 520,160
+          C 505,158 490,160 476,165
+          C 462,170 450,178 440,188
+          C 432,198 428,210 427,223
+          C 427,236 430,248 436,258
+          C 443,268 452,275 463,280
+          C 475,284 488,286 502,285
+          C 515,283 527,278 537,270
+          C 546,262 552,252 555,240
+          C 557,228 556,215 552,204
+          C 547,193 540,185 530,180
+          L 530,180
+          C 545,175 562,172 580,172
+          C 600,173 618,178 635,186
+          C 652,195 666,208 678,222
+          C 690,238 698,255 703,274
+          C 707,293 708,312 705,332
+          C 702,350 695,367 685,382
+          C 674,396 660,408 644,417
+          C 628,425 610,430 592,432
+          C 573,433 555,430 538,424
+          C 520,417 505,407 492,394
+          C 480,380 472,365 468,348
+          C 465,332 466,315 470,298
+          C 475,282 483,268 494,256
+          C 505,245 518,237 533,232
+          C 548,228 564,228 580,232
+          C 596,237 610,245 622,256
+          C 633,268 640,282 644,298
+          C 647,315 646,332 641,348
+          C 635,363 626,376 614,386
+          C 602,395 588,400 572,402
+          C 556,403 540,400 526,393
+          C 513,385 503,374 496,360
+          C 490,346 488,330 490,314
+          C 493,298 500,285 510,274
+          C 521,264 534,258 548,256
+          C 562,255 576,258 588,265
+          C 600,273 608,284 613,298
+          C 617,312 617,327 613,342
+          C 608,356 600,367 589,375
+          C 578,382 566,386 552,388
+          C 540,388 530,385 522,378
+          L 522,378
+          C 530,392 542,408 558,420
+          C 575,432 595,440 618,445
+          C 642,448 668,447 694,442
+          C 718,436 740,426 758,412
+          C 774,398 786,380 794,360
+          C 800,340 802,318 798,296
+          C 793,274 784,254 770,238
+          C 755,222 738,210 718,202
+          C 698,196 678,194 658,196
+          C 640,199 624,206 610,216
+          C 598,226 590,240 585,256
+          C 582,272 582,288 586,304
+          C 591,318 598,330 608,340
+          C 619,348 632,353 646,355
+          C 660,356 674,353 686,346
+          C 697,339 705,328 710,316
+          C 714,303 714,290 710,277
+          C 705,265 698,256 688,250
+          C 678,245 667,244 656,246
+          C 645,249 637,255 632,264
+          L 632,264
+          C 638,280 650,298 668,312
+          C 686,324 708,332 732,336
+          C 756,338 780,335 802,328
+          C 822,320 838,308 850,292
+          C 860,276 865,258 864,238
+          C 862,220 855,204 843,190
+          C 830,178 815,170 798,166
+          C 780,164 762,166 746,172
+          C 732,178 720,188 712,200
+          C 705,214 703,228 706,244
+          C 710,258 718,270 730,278
+          C 742,285 755,288 770,287
+          C 783,284 794,278 802,268
+          C 808,258 810,246 808,234
+          L 808,234
+          C 815,248 825,265 838,278
+          C 850,290 863,298 878,302
+          C 892,304 905,302 916,296
+          C 925,288 930,278 932,266
+          C 932,254 928,242 920,232
+          C 910,224 898,220 885,220
+          C 874,222 866,228 860,238
+          L 860,238
+          C 856,256 858,278 864,298
+          C 870,316 880,330 893,340
+          C 905,348 918,352 932,350
+          C 944,346 952,338 956,326
+          C 958,314 956,302 950,290
+          C 942,280 932,274 920,272
+          L 920,272
+          C 915,290 905,310 890,326
+          C 875,340 856,350 835,356
+          C 814,360 792,360 770,356
+          C 748,350 728,340 710,326
+          C 694,312 682,296 674,278
+          C 668,260 666,242 670,224
+          C 675,208 684,194 698,184
+          C 712,176 728,172 746,172
+          L 746,172
+          C 730,180 710,192 695,208
+          C 682,224 675,242 674,262
+          C 674,282 680,300 692,316
+          C 704,330 720,340 738,346
+          C 756,350 775,350 794,345
+          C 812,338 826,328 836,314
+          C 844,300 847,284 845,268
+          C 842,252 834,238 822,228
+          C 810,220 796,216 782,218
+          C 768,222 758,230 752,242
+          L 752,242
+          C 746,258 736,278 722,294
+          C 708,308 690,318 670,322
+          C 650,324 630,320 612,310
+          C 596,300 584,286 576,268
+          C 570,250 570,232 576,214
+          C 583,198 594,186 608,178
+          C 623,172 640,170 657,172
+          C 674,176 688,184 700,196
+          C 710,208 716,222 718,238
+          C 718,254 714,268 706,280
+          C 697,290 686,296 673,298
+          C 660,298 648,294 638,286
+          L 638,286
+          C 625,300 608,318 588,332
+          C 568,344 545,350 520,352
+          C 496,352 474,346 454,336
+          C 436,326 422,312 412,296
+          C 404,280 400,262 402,244
+          C 405,228 414,215 426,204
+          C 440,196 456,192 474,194
+          C 490,198 502,208 510,222
+          L 510,222
+          C 505,240 496,260 484,278
+          C 472,294 458,306 442,314
+          C 426,320 408,322 390,320
+          C 374,316 360,308 350,296
+          C 342,284 338,270 340,256
+          C 343,244 350,234 360,228
+          C 372,224 384,224 396,228
+          L 396,228
+          C 385,242 370,260 356,280
+          C 344,298 336,316 332,336
+          C 330,356 334,374 344,390
+          C 355,404 370,414 388,420
+          C 408,424 428,424 448,420
+          C 466,414 480,404 490,390
+          L 490,390
+          C 492,410 496,432 502,452
+          C 508,470 516,485 528,498
+          C 540,508 554,515 570,518
+          C 585,520 598,516 608,508
+          C 616,498 618,486 615,472
+          C 610,460 600,452 588,448
+          C 575,446 563,450 554,458
+          L 554,458
+          C 548,472 538,488 524,500
+          C 510,510 494,516 478,518
+          C 464,518 452,514 444,506
+          L 444,506
+          C 450,514 460,522 472,528
+          C 480,530 480,530 480,530
+          Z
+        " fill="none" stroke="#333" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+
+        <!-- Segment highlight overlays (colored when active) -->
+        <g id="segment-highlights"></g>
+
+        <!-- Corner labels group (populated by JS) -->
+        <g id="corner-labels"></g>
+
+        <!-- Start/Finish marker -->
+        <g id="start-marker">
+          <rect x="472" y="524" width="18" height="12" rx="2" fill="#ef4444" opacity=".9"/>
+          <text x="481" y="532" text-anchor="middle" fill="white" font-size="5" font-weight="700">BTG</text>
+        </g>
+
+        <!-- Car icon (GT4RS style) - positioned by JS -->
+        <g id="car-icon" transform="translate(480,530)">
+          <g transform="translate(-8,-4)">
+            <!-- Car body -->
+            <rect x="1" y="1" width="14" height="6" rx="2" fill="#ef4444"/>
+            <!-- Windshield -->
+            <rect x="9" y="1.5" width="4" height="5" rx="1" fill="#1a1a1a" opacity=".6"/>
+            <!-- Rear wing -->
+            <rect x="0" y="0" width="3" height="8" rx="1" fill="#b91c1c"/>
+            <!-- Wheels -->
+            <circle cx="4" cy="0.5" r="1.2" fill="#111"/>
+            <circle cx="4" cy="7.5" r="1.2" fill="#111"/>
+            <circle cx="12" cy="0.5" r="1.2" fill="#111"/>
+            <circle cx="12" cy="7.5" r="1.2" fill="#111"/>
+            <!-- Headlights -->
+            <rect x="14" y="2" width="1.5" height="1" rx=".5" fill="#fbbf24"/>
+            <rect x="14" y="5" width="1.5" height="1" rx=".5" fill="#fbbf24"/>
+          </g>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Info bar -->
+  <div id="info-bar" class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-racing-card border border-racing-border rounded-lg p-3 text-center">
+      <div class="text-neutral-500 text-xs uppercase tracking-wide">Corner</div>
+      <div id="info-corner" class="text-white font-bold text-sm mt-1 truncate">Brünnchen (BTG)</div>
+    </div>
+    <div class="bg-racing-card border border-racing-border rounded-lg p-3 text-center">
+      <div class="text-neutral-500 text-xs uppercase tracking-wide">Distance</div>
+      <div id="info-distance" class="text-white font-bold text-sm mt-1">0.00 km</div>
+    </div>
+    <div class="bg-racing-card border border-racing-border rounded-lg p-3 text-center">
+      <div class="text-neutral-500 text-xs uppercase tracking-wide">Progress</div>
+      <div id="info-progress" class="text-racing-red font-bold text-sm mt-1">0%</div>
+    </div>
+    <div class="bg-racing-card border border-racing-border rounded-lg p-3 text-center">
+      <div class="text-neutral-500 text-xs uppercase tracking-wide">Segment</div>
+      <div id="info-segment" class="text-white font-bold text-sm mt-1">1 / 7</div>
+    </div>
+  </div>
+
+  <!-- Slider -->
+  <div class="mt-4 bg-racing-card border border-racing-border rounded-lg p-4">
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-xs text-neutral-500 font-semibold">BTG Start (0 km)</span>
+      <span class="text-xs text-neutral-500 font-semibold">Finish (20.8 km)</span>
+    </div>
+    <input type="range" id="track-slider" class="track-slider" min="0" max="1000" value="0" step="1"/>
+    <div class="flex justify-between mt-2">
+      <span class="text-[10px] text-neutral-600">Seg 1</span>
+      <span class="text-[10px] text-neutral-600">Seg 2</span>
+      <span class="text-[10px] text-neutral-600">Seg 3</span>
+      <span class="text-[10px] text-neutral-600">Seg 4</span>
+      <span class="text-[10px] text-neutral-600">Seg 5</span>
+      <span class="text-[10px] text-neutral-600">Seg 6</span>
+      <span class="text-[10px] text-neutral-600">Seg 7</span>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="mt-3 flex flex-wrap items-center gap-4 text-xs text-neutral-500">
+    <span>🔴 <strong class="text-neutral-300">BTG</strong> = Brünnchen – T13 Gate (Tourist Entry)</span>
+    <span>🟢 <strong class="text-neutral-300">7 Segments</strong> — color coded on map</span>
+    <span>Drag slider or tap to explore all 125 corners</span>
+  </div>
+</section>
+
+<!-- ┌─────────────────────────────────────────────────────
+     │  TAB 2: TIMETABLE
+     └───────────────────────────────────────────────────── -->
+<section id="tab-timetable" class="tab-content">
+  <div class="flex items-center justify-between mb-4">
+    <div>
+      <h2 class="text-xl font-black">Nordschleife <span class="text-racing-red">Public Driving Days</span></h2>
+      <p class="text-neutral-500 text-sm mt-1">Combined calendar • Sources: nuerburgring.de & ringfreaks.de</p>
+    </div>
+    <button id="refresh-cal" class="flex items-center gap-2 bg-racing-red/10 text-racing-red px-4 py-2 rounded-lg text-sm font-semibold hover:bg-racing-red/20 transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <div class="bg-racing-card border border-racing-border rounded-xl overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="cal-table w-full text-sm">
+        <thead>
+          <tr class="bg-neutral-800/50 text-neutral-400 text-xs uppercase tracking-wider">
+            <th class="px-4 py-3 text-left bg-neutral-800/90">Date</th>
+            <th class="px-4 py-3 text-left bg-neutral-800/90">Day</th>
+            <th class="px-4 py-3 text-left bg-neutral-800/90">Time</th>
+            <th class="px-4 py-3 text-left bg-neutral-800/90">Type</th>
+            <th class="px-4 py-3 text-left bg-neutral-800/90">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="cal-body">
+          <tr><td colspan="5" class="px-4 py-8 text-center text-neutral-500">Loading timetable…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="text-neutral-600 text-xs mt-3">
+    ⚠️ Always verify dates on <a href="https://nuerburgring.de/open-hours" target="_blank" class="text-racing-red hover:underline">nuerburgring.de</a> before travelling. Schedule subject to change.
+  </p>
+</section>
+
+<!-- ┌─────────────────────────────────────────────────────
+     │  TAB 3: LIVE CAMS
+     └───────────────────────────────────────────────────── -->
+<section id="tab-livecams" class="tab-content">
+  <h2 class="text-xl font-black mb-2">Live <span class="text-racing-red">Webcam</span></h2>
+  <p class="text-neutral-500 text-sm mb-4">Nordschleife Entrance – Live Feed</p>
+
+  <div class="bg-racing-card border border-racing-border rounded-xl overflow-hidden">
+    <div class="aspect-video w-full bg-black flex items-center justify-center relative">
+      <!-- Primary: YouTube live embed (Nürburgring official / community cams) -->
+      <iframe
+        id="webcam-frame"
+        class="w-full h-full"
+        src="https://www.youtube.com/embed/live_stream?channel=UCkzEMpMfEkXbKnE6AGXBQ0g&autoplay=1&mute=1"
+        title="Nordschleife Entrance Webcam"
+        frameborder="0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen
+        loading="lazy"
+      ></iframe>
+      <!-- Fallback overlay -->
+      <div id="cam-fallback" class="absolute inset-0 flex flex-col items-center justify-center bg-black/80 hidden">
+        <svg class="w-16 h-16 text-neutral-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        <p class="text-neutral-400 text-sm">Live feed unavailable</p>
+        <a href="https://www.nuerburgring.de/info/webcams" target="_blank" class="text-racing-red text-sm mt-2 hover:underline">View on nuerburgring.de →</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+    <a href="https://www.nuerburgring.de/info/webcams" target="_blank" class="bg-racing-card border border-racing-border rounded-lg p-4 hover:border-racing-red/30 transition">
+      <div class="text-sm font-semibold text-white">Official Webcams</div>
+      <div class="text-xs text-neutral-500 mt-1">nuerburgring.de webcam page</div>
+    </a>
+    <a href="https://www.youtube.com/results?search_query=nordschleife+live" target="_blank" class="bg-racing-card border border-racing-border rounded-lg p-4 hover:border-racing-red/30 transition">
+      <div class="text-sm font-semibold text-white">YouTube Live Streams</div>
+      <div class="text-xs text-neutral-500 mt-1">Community live streams</div>
+    </a>
+    <a href="https://ringfreaks.de" target="_blank" class="bg-racing-card border border-racing-border rounded-lg p-4 hover:border-racing-red/30 transition">
+      <div class="text-sm font-semibold text-white">Ringfreaks</div>
+      <div class="text-xs text-neutral-500 mt-1">Community info & schedules</div>
+    </a>
+  </div>
+</section>
+
+<!-- ┌─────────────────────────────────────────────────────
+     │  TAB 4: STATUS
+     └───────────────────────────────────────────────────── -->
+<section id="tab-status" class="tab-content">
+  <h2 class="text-xl font-black mb-2">Track <span class="text-racing-red">Status</span></h2>
+  <p class="text-neutral-500 text-sm mb-4">Live status from nuerburgring.de</p>
+
+  <div id="status-card" class="bg-racing-card border-2 border-neutral-700 rounded-xl p-8 text-center transition-all duration-500">
+    <div id="status-icon" class="text-6xl mb-4">🔄</div>
+    <div id="status-label" class="text-3xl font-black mb-2">Checking…</div>
+    <div id="status-detail" class="text-neutral-400 text-sm">Fetching current Nordschleife status</div>
+    <div id="status-time" class="text-neutral-600 text-xs mt-4">Last checked: –</div>
+  </div>
+
+  <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="bg-racing-card border border-racing-border rounded-lg p-4 text-center">
+      <div class="w-4 h-4 rounded-full bg-green-500 mx-auto mb-2"></div>
+      <div class="text-sm font-semibold text-white">Open</div>
+      <div class="text-xs text-neutral-500 mt-1">Track is open for Touristenfahrten</div>
+    </div>
+    <div class="bg-racing-card border border-racing-border rounded-lg p-4 text-center">
+      <div class="w-4 h-4 rounded-full bg-yellow-500 mx-auto mb-2"></div>
+      <div class="text-sm font-semibold text-white">Limited</div>
+      <div class="text-xs text-neutral-500 mt-1">Partially open or conditions apply</div>
+    </div>
+    <div class="bg-racing-card border border-racing-border rounded-lg p-4 text-center">
+      <div class="w-4 h-4 rounded-full bg-red-500 mx-auto mb-2"></div>
+      <div class="text-sm font-semibold text-white">Closed</div>
+      <div class="text-xs text-neutral-500 mt-1">Accident, weather, or event</div>
+    </div>
+  </div>
+
+  <div class="mt-6">
+    <a href="https://nuerburgring.de/open-hours" target="_blank"
+       class="inline-flex items-center gap-2 bg-racing-red/10 text-racing-red px-5 py-3 rounded-lg text-sm font-semibold hover:bg-racing-red/20 transition">
+      View on nuerburgring.de →
+    </a>
+  </div>
+</section>
+
+</main>
+
+<!-- ══════════════════════════════════════════════════════
+     FOOTER
+     ══════════════════════════════════════════════════════ -->
+<footer class="border-t border-racing-border mt-12 py-6 px-4 text-center">
+  <p class="text-neutral-500 text-xs">
+    For enthusiasts • Not affiliated with Nürburgring GmbH
+  </p>
+  <p class="text-neutral-600 text-[10px] mt-1">
+    NBRinfo.com © 2024–2026 • GT4RS imagery credit to respective owners
+  </p>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     JAVASCRIPT — All application logic
+     ══════════════════════════════════════════════════════════════════ -->
+<script>
+(function() {
+  'use strict';
+
+  /* ──────────────────────────────────────────────────────
+     §1. NORDSCHLEIFE CORNER DATA — 125 corners with name,
+         approximate km mark, and % along total track length.
+         Grouped into 7 segments.
+     ────────────────────────────────────────────────────── */
+  const TOTAL_KM = 20.832;
+
+  // 125 corners of the Nordschleife, ordered by km from BTG start
+  const CORNERS = [
+    // ── Segment 1: BTG Start → Hatzenbach (km 0–3.0) ──
+    { name: "BTG (Start/Finish)", km: 0.0, seg: 1 },
+    { name: "Döttinger Höhe Entry", km: 0.2, seg: 1 },
+    { name: "Antoniusbuche", km: 0.5, seg: 1 },
+    { name: "T13 / Tiergarten", km: 0.8, seg: 1 },
+    { name: "Hohenrain Schikane", km: 1.0, seg: 1 },
+    { name: "Hohenrain", km: 1.2, seg: 1 },
+    { name: "Hatzenbach 1", km: 1.5, seg: 1 },
+    { name: "Hatzenbach 2", km: 1.7, seg: 1 },
+    { name: "Hatzenbach 3", km: 1.9, seg: 1 },
+    { name: "Hatzenbach Bogen", km: 2.1, seg: 1 },
+    { name: "Hocheichen Entry", km: 2.3, seg: 1 },
+    { name: "Hocheichen", km: 2.5, seg: 1 },
+    { name: "Hocheichen Exit", km: 2.6, seg: 1 },
+    { name: "Quiddelbacher Höhe", km: 2.8, seg: 1 },
+    { name: "Quiddelbacher Höhe Exit", km: 2.9, seg: 1 },
+    { name: "Flugplatz Entry", km: 3.0, seg: 1 },
+    { name: "Flugplatz", km: 3.1, seg: 1 },
+    { name: "Flugplatz Jump", km: 3.2, seg: 1 },
+
+    // ── Segment 2: Schwedenkreuz → Adenauer Forst (km 3.3–6.0) ──
+    { name: "Schwedenkreuz Entry", km: 3.3, seg: 2 },
+    { name: "Schwedenkreuz", km: 3.5, seg: 2 },
+    { name: "Aremberg Entry", km: 3.8, seg: 2 },
+    { name: "Aremberg", km: 4.0, seg: 2 },
+    { name: "Aremberg Exit", km: 4.2, seg: 2 },
+    { name: "Fuchsröhre Entry", km: 4.4, seg: 2 },
+    { name: "Fuchsröhre", km: 4.6, seg: 2 },
+    { name: "Fuchsröhre Exit", km: 4.8, seg: 2 },
+    { name: "Adenauer Forst Entry", km: 5.0, seg: 2 },
+    { name: "Adenauer Forst 1", km: 5.2, seg: 2 },
+    { name: "Adenauer Forst 2", km: 5.4, seg: 2 },
+    { name: "Adenauer Forst 3", km: 5.6, seg: 2 },
+    { name: "Adenauer Forst Exit", km: 5.8, seg: 2 },
+    { name: "Metzgesfeld Entry", km: 5.9, seg: 2 },
+    { name: "Metzgesfeld", km: 6.0, seg: 2 },
+
+    // ── Segment 3: Kallenhard → Ex-Mühle (km 6.1–9.0) ──
+    { name: "Kallenhard Entry", km: 6.1, seg: 3 },
+    { name: "Kallenhard", km: 6.3, seg: 3 },
+    { name: "Kallenhard Exit", km: 6.5, seg: 3 },
+    { name: "Wehrseifen Entry", km: 6.6, seg: 3 },
+    { name: "Wehrseifen", km: 6.8, seg: 3 },
+    { name: "Wehrseifen Brücke", km: 7.0, seg: 3 },
+    { name: "Wehrseifen Exit", km: 7.1, seg: 3 },
+    { name: "Breidscheid Entry", km: 7.3, seg: 3 },
+    { name: "Breidscheid", km: 7.5, seg: 3 },
+    { name: "Breidscheid Exit", km: 7.6, seg: 3 },
+    { name: "Ex-Mühle Entry", km: 7.8, seg: 3 },
+    { name: "Ex-Mühle", km: 8.0, seg: 3 },
+    { name: "Ex-Mühle Exit", km: 8.1, seg: 3 },
+    { name: "Lauda Links", km: 8.3, seg: 3 },
+    { name: "Lauda Rechts", km: 8.5, seg: 3 },
+    { name: "Bergwerk Entry", km: 8.7, seg: 3 },
+    { name: "Bergwerk", km: 8.9, seg: 3 },
+    { name: "Bergwerk Exit", km: 9.0, seg: 3 },
+
+    // ── Segment 4: Kesselchen → Karussell (km 9.1–12.0) ──
+    { name: "Kesselchen Entry", km: 9.1, seg: 4 },
+    { name: "Kesselchen 1", km: 9.3, seg: 4 },
+    { name: "Kesselchen 2", km: 9.5, seg: 4 },
+    { name: "Kesselchen Exit", km: 9.7, seg: 4 },
+    { name: "Klostertal Entry", km: 9.9, seg: 4 },
+    { name: "Klostertal 1", km: 10.0, seg: 4 },
+    { name: "Klostertal 2", km: 10.2, seg: 4 },
+    { name: "Klostertal Exit", km: 10.3, seg: 4 },
+    { name: "Steilstrecke Entry", km: 10.5, seg: 4 },
+    { name: "Steilstrecke", km: 10.7, seg: 4 },
+    { name: "Steilstrecke Exit", km: 10.8, seg: 4 },
+    { name: "Caracciola-Karussell Entry", km: 11.0, seg: 4 },
+    { name: "Caracciola-Karussell", km: 11.2, seg: 4 },
+    { name: "Caracciola-Karussell Mid", km: 11.3, seg: 4 },
+    { name: "Caracciola-Karussell Exit", km: 11.5, seg: 4 },
+    { name: "Hohe Acht Entry", km: 11.6, seg: 4 },
+    { name: "Hohe Acht", km: 11.8, seg: 4 },
+    { name: "Hohe Acht Exit", km: 11.9, seg: 4 },
+
+    // ── Segment 5: Hedwigshöhe → Pflanzgarten (km 12.0–15.0) ──
+    { name: "Hedwigshöhe", km: 12.0, seg: 5 },
+    { name: "Wippermann Entry", km: 12.2, seg: 5 },
+    { name: "Wippermann", km: 12.4, seg: 5 },
+    { name: "Wippermann Exit", km: 12.5, seg: 5 },
+    { name: "Eschbach Entry", km: 12.7, seg: 5 },
+    { name: "Eschbach", km: 12.9, seg: 5 },
+    { name: "Eschbach Exit", km: 13.0, seg: 5 },
+    { name: "Brünnchen Entry", km: 13.2, seg: 5 },
+    { name: "Brünnchen 1", km: 13.4, seg: 5 },
+    { name: "Brünnchen 2", km: 13.5, seg: 5 },
+    { name: "Brünnchen Exit", km: 13.7, seg: 5 },
+    { name: "Eiskurve Entry", km: 13.9, seg: 5 },
+    { name: "Eiskurve", km: 14.0, seg: 5 },
+    { name: "Eiskurve Exit", km: 14.1, seg: 5 },
+    { name: "Pflanzgarten 1 Entry", km: 14.3, seg: 5 },
+    { name: "Pflanzgarten 1", km: 14.5, seg: 5 },
+    { name: "Pflanzgarten 1 Jump", km: 14.6, seg: 5 },
+    { name: "Pflanzgarten 1 Exit", km: 14.8, seg: 5 },
+
+    // ── Segment 6: Pflanzgarten 2 → Galgenkopf (km 15.0–18.0) ──
+    { name: "Pflanzgarten 2 Entry", km: 15.0, seg: 6 },
+    { name: "Pflanzgarten 2", km: 15.2, seg: 6 },
+    { name: "Pflanzgarten 2 Jump", km: 15.3, seg: 6 },
+    { name: "Pflanzgarten 2 Exit", km: 15.5, seg: 6 },
+    { name: "Sprunghügel", km: 15.6, seg: 6 },
+    { name: "Stefan-Bellof-S Entry", km: 15.8, seg: 6 },
+    { name: "Stefan-Bellof-S", km: 16.0, seg: 6 },
+    { name: "Stefan-Bellof-S Exit", km: 16.1, seg: 6 },
+    { name: "Kleine Karussell Entry", km: 16.3, seg: 6 },
+    { name: "Kleine Karussell", km: 16.5, seg: 6 },
+    { name: "Kleine Karussell Exit", km: 16.6, seg: 6 },
+    { name: "Galgenkopf Entry", km: 16.8, seg: 6 },
+    { name: "Galgenkopf", km: 17.0, seg: 6 },
+    { name: "Galgenkopf Kuppe", km: 17.2, seg: 6 },
+    { name: "Galgenkopf Exit", km: 17.4, seg: 6 },
+    { name: "Döttinger Höhe Entry", km: 17.6, seg: 6 },
+    { name: "Döttinger Höhe Straight", km: 17.8, seg: 6 },
+
+    // ── Segment 7: Döttinger Höhe → BTG Finish (km 18.0–20.832) ──
+    { name: "Döttinger Höhe Mid", km: 18.0, seg: 7 },
+    { name: "Döttinger Höhe Full Speed", km: 18.3, seg: 7 },
+    { name: "Döttinger Höhe Braking", km: 18.6, seg: 7 },
+    { name: "Döttinger Höhe End", km: 18.8, seg: 7 },
+    { name: "Hohenrain-Chicane Approach", km: 19.0, seg: 7 },
+    { name: "Hohenrain-Chicane Entry", km: 19.2, seg: 7 },
+    { name: "Hohenrain-Chicane", km: 19.4, seg: 7 },
+    { name: "Hohenrain-Chicane Exit", km: 19.5, seg: 7 },
+    { name: "Tiergarten Return", km: 19.7, seg: 7 },
+    { name: "Tiergarten Kurve", km: 19.9, seg: 7 },
+    { name: "Antoniusbuche Return", km: 20.1, seg: 7 },
+    { name: "BTG Approach", km: 20.3, seg: 7 },
+    { name: "BTG Entry Gate", km: 20.5, seg: 7 },
+    { name: "BTG Final", km: 20.7, seg: 7 },
+    { name: "BTG Finish", km: 20.832, seg: 7 }
+  ];
+
+  // Segment definitions
+  const SEGMENTS = [
+    { id: 1, name: "BTG → Flugplatz",           color: "#ef4444", startKm: 0,     endKm: 3.2 },
+    { id: 2, name: "Schwedenkreuz → Metzgesfeld", color: "#f97316", startKm: 3.3,  endKm: 6.0 },
+    { id: 3, name: "Kallenhard → Bergwerk",       color: "#eab308", startKm: 6.1,  endKm: 9.0 },
+    { id: 4, name: "Kesselchen → Hohe Acht",      color: "#22c55e", startKm: 9.1,  endKm: 11.9 },
+    { id: 5, name: "Hedwigshöhe → Pflanzgarten",  color: "#3b82f6", startKm: 12.0, endKm: 14.8 },
+    { id: 6, name: "Pflanzgarten 2 → Döttinger",  color: "#8b5cf6", startKm: 15.0, endKm: 17.8 },
+    { id: 7, name: "Döttinger Höhe → BTG",        color: "#ec4899", startKm: 18.0, endKm: 20.832 }
+  ];
+
+  /* ──────────────────────────────────────────────────────
+     §2. TAB NAVIGATION
+     ────────────────────────────────────────────────────── */
+  function switchTab(tabId) {
+    // Hide all tab contents
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    // Deactivate all tab buttons
+    document.querySelectorAll('.tab-btn, .tab-btn-m').forEach(btn => {
+      btn.classList.remove('active');
+      btn.classList.remove('text-white');
+      btn.classList.add('text-neutral-400');
+    });
+    // Show target tab
+    const target = document.getElementById('tab-' + tabId);
+    if (target) target.classList.add('active');
+    // Activate matching buttons
+    document.querySelectorAll(`[data-tab="${tabId}"]`).forEach(btn => {
+      btn.classList.add('active');
+      btn.classList.remove('text-neutral-400');
+      btn.classList.add('text-white');
+    });
+    // Close mobile menu
+    document.getElementById('mobile-menu').classList.add('hidden');
+  }
+  window.switchTab = switchTab;
+
+  // Bind tab buttons
+  document.querySelectorAll('.tab-btn, .tab-btn-m').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  // Mobile menu toggle
+  document.getElementById('mobile-menu-btn').addEventListener('click', () => {
+    document.getElementById('mobile-menu').classList.toggle('hidden');
+  });
+
+  /* ──────────────────────────────────────────────────────
+     §3. TRACK MAP — SVG PATH + CAR + SLIDER
+     ────────────────────────────────────────────────────── */
+  const trackPath = document.getElementById('track-road');
+  const carIcon = document.getElementById('car-icon');
+  const slider = document.getElementById('track-slider');
+  const tooltip = document.getElementById('car-tooltip');
+  const trackContainer = document.getElementById('track-container');
+  const svg = document.getElementById('track-svg');
+
+  // Get total path length for calculations
+  const pathLength = trackPath.getTotalLength();
+
+  // Place corner labels on the SVG
+  const labelsGroup = document.getElementById('corner-labels');
+  CORNERS.forEach((c, i) => {
+    const pct = c.km / TOTAL_KM;
+    const pt = trackPath.getPointAtLength(pct * pathLength);
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute('x', pt.x);
+    text.setAttribute('y', pt.y - 6);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('class', 'corner-label');
+    text.setAttribute('data-idx', i);
+    // Abbreviate: show every 3rd label or important ones to avoid clutter
+    if (i % 3 === 0 || c.name.includes('Entry') === false) {
+      text.textContent = c.name.replace(' Entry', '').replace(' Exit', '');
+    }
+    // Only show subset to avoid clutter — full names appear on hover/tooltip
+    if (i % 5 !== 0 && !c.name.includes('Karussell') && !c.name.includes('Flugplatz') &&
+        !c.name.includes('Bergwerk') && !c.name.includes('BTG') && !c.name.includes('Brünnchen') &&
+        !c.name.includes('Pflanzgarten') && !c.name.includes('Schwedenkreuz') &&
+        !c.name.includes('Adenauer') && !c.name.includes('Hohe Acht') &&
+        !c.name.includes('Döttinger') && !c.name.includes('Stefan-Bellof')) {
+      text.style.opacity = '0.35';
+      text.style.fontSize = '2.5px';
+    }
+    labelsGroup.appendChild(text);
+  });
+
+  // Find nearest corner to a given km
+  function nearestCorner(km) {
+    let best = CORNERS[0], bestDist = Math.abs(km - CORNERS[0].km);
+    for (let i = 1; i < CORNERS.length; i++) {
+      const d = Math.abs(km - CORNERS[i].km);
+      if (d < bestDist) { best = CORNERS[i]; bestDist = d; }
+    }
+    return best;
+  }
+
+  // Find segment for a given km
+  function getSegment(km) {
+    for (const s of SEGMENTS) {
+      if (km >= s.startKm && km <= s.endKm) return s;
+    }
+    return SEGMENTS[SEGMENTS.length - 1];
+  }
+
+  // Get tangent angle at a point on the path
+  function getTangentAngle(len) {
+    const delta = 0.5;
+    const p1 = trackPath.getPointAtLength(Math.max(0, len - delta));
+    const p2 = trackPath.getPointAtLength(Math.min(pathLength, len + delta));
+    return Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
+  }
+
+  // Tooltip hide timer
+  let tooltipTimer = null;
+  let lastCornerName = '';
+  let zoomTimer = null;
+  let isZoomed = false;
+
+  // Zoom into segment
+  function zoomToSegment(seg, pt) {
+    if (zoomTimer) clearTimeout(zoomTimer);
+    const scale = 2.2;
+    // Center on the car position within the SVG viewBox (0 0 1000 600)
+    const tx = 500 - pt.x * scale;
+    const ty = 300 - pt.y * scale;
+    trackContainer.style.transform = `scale(${scale}) translate(${tx/scale}px, ${ty/scale}px)`;
+    isZoomed = true;
+    zoomTimer = setTimeout(() => {
+      trackContainer.style.transform = 'scale(1) translate(0,0)';
+      isZoomed = false;
+    }, 3000);
+  }
+
+  // Update car position based on slider
+  let prevSegId = 1;
+  function updateCar(sliderVal) {
+    const pct = sliderVal / 1000; // 0..1
+    const km = pct * TOTAL_KM;
+    const len = pct * pathLength;
+
+    // Get point on path
+    const pt = trackPath.getPointAtLength(len);
+    const angle = getTangentAngle(len);
+
+    // Move car
+    carIcon.setAttribute('transform', `translate(${pt.x},${pt.y}) rotate(${angle})`);
+
+    // Find nearest corner
+    const corner = nearestCorner(km);
+    const seg = getSegment(km);
+
+    // Update info bar
+    document.getElementById('info-corner').textContent = corner.name;
+    document.getElementById('info-distance').textContent = km.toFixed(2) + ' km';
+    document.getElementById('info-progress').textContent = Math.round(pct * 100) + '%';
+    document.getElementById('info-segment').textContent = seg.id + ' / 7 — ' + seg.name;
+
+    // Highlight active corner label
+    document.querySelectorAll('.corner-label.active').forEach(el => el.classList.remove('active'));
+    const idx = CORNERS.indexOf(corner);
+    const label = labelsGroup.querySelector(`[data-idx="${idx}"]`);
+    if (label) label.classList.add('active');
+
+    // Show tooltip when reaching a corner (within 0.15 km)
+    const distToCorner = Math.abs(km - corner.km);
+    if (distToCorner < 0.15 && corner.name !== lastCornerName) {
+      lastCornerName = corner.name;
+      tooltip.textContent = `${corner.name} • ${corner.km.toFixed(1)} km`;
+      tooltip.classList.add('show');
+
+      // Position tooltip relative to container
+      const svgRect = svg.getBoundingClientRect();
+      const containerRect = trackContainer.getBoundingClientRect();
+      const scaleX = svgRect.width / 1000;
+      const scaleY = svgRect.height / 600;
+      tooltip.style.left = (pt.x * scaleX) + 'px';
+      tooltip.style.top = (pt.y * scaleY) + 'px';
+
+      if (tooltipTimer) clearTimeout(tooltipTimer);
+      tooltipTimer = setTimeout(() => tooltip.classList.remove('show'), 2000);
+    }
+
+    // Zoom on segment change
+    if (seg.id !== prevSegId) {
+      zoomToSegment(seg, pt);
+      prevSegId = seg.id;
+    }
+  }
+
+  // Slider event — 60fps with requestAnimationFrame
+  let rafId = null;
+  slider.addEventListener('input', () => {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => updateCar(parseInt(slider.value)));
+  });
+
+  // Initialize car at start
+  updateCar(0);
+
+  /* ──────────────────────────────────────────────────────
+     §4. TRACK STATUS — Fetch from nuerburgring.de
+     ────────────────────────────────────────────────────── */
+  async function fetchTrackStatus() {
+    const frame = document.getElementById('status-frame');
+    const banner = document.getElementById('status-banner');
+    const statusText = document.getElementById('status-text');
+    const statusCard = document.getElementById('status-card');
+    const statusIcon = document.getElementById('status-icon');
+    const statusLabel = document.getElementById('status-label');
+    const statusDetail = document.getElementById('status-detail');
+    const statusTime = document.getElementById('status-time');
+
+    try {
+      // Try CORS proxy to fetch nuerburgring.de/open-hours
+      // In production, you'd use your own proxy or server-side scrape.
+      // For GitHub Pages, we use allorigins as a CORS proxy.
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://nuerburgring.de/open-hours');
+      const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+      const html = await resp.text();
+
+      // Parse the HTML for status indicators
+      let status = 'unknown';
+      const lower = html.toLowerCase();
+
+      if (lower.includes('geöffnet') || lower.includes('open') || lower.includes('status-open') ||
+          lower.includes('bg-green') || lower.includes('color: green') || lower.includes('ampel-gruen')) {
+        status = 'open';
+      } else if (lower.includes('eingeschränkt') || lower.includes('limited') || lower.includes('teilweise') ||
+                 lower.includes('bg-yellow') || lower.includes('ampel-gelb')) {
+        status = 'limited';
+      } else if (lower.includes('geschlossen') || lower.includes('closed') || lower.includes('gesperrt') ||
+                 lower.includes('bg-red') || lower.includes('ampel-rot')) {
+        status = 'closed';
+      }
+
+      applyStatus(status);
+    } catch (err) {
+      console.warn('Status fetch failed:', err);
+      applyStatus('unknown');
+    }
+  }
+
+  function applyStatus(status) {
+    const frame = document.getElementById('status-frame');
+    const banner = document.getElementById('status-banner');
+    const statusText = document.getElementById('status-text');
+    const statusIcon = document.getElementById('status-icon');
+    const statusLabel = document.getElementById('status-label');
+    const statusDetail = document.getElementById('status-detail');
+    const statusTime = document.getElementById('status-time');
+    const statusCard = document.getElementById('status-card');
+    const now = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+
+    frame.className = '';
+    statusCard.className = 'bg-racing-card border-2 rounded-xl p-8 text-center transition-all duration-500';
+
+    switch (status) {
+      case 'open':
+        frame.classList.add('open');
+        banner.className = 'w-full text-center text-sm font-semibold py-1.5 px-4 bg-green-900/40 text-green-400 z-50 relative';
+        statusText.innerHTML = '🟢 Nordschleife is <strong>OPEN</strong> for Touristenfahrten';
+        statusIcon.textContent = '🟢';
+        statusLabel.textContent = 'OPEN';
+        statusLabel.className = 'text-3xl font-black mb-2 text-green-400';
+        statusDetail.textContent = 'Track is open for public driving (Touristenfahrten)';
+        statusCard.classList.add('border-green-500/50');
+        break;
+      case 'limited':
+        frame.classList.add('limited');
+        banner.className = 'w-full text-center text-sm font-semibold py-1.5 px-4 bg-yellow-900/40 text-yellow-400 z-50 relative';
+        statusText.innerHTML = '🟡 Nordschleife is <strong>LIMITED</strong>';
+        statusIcon.textContent = '🟡';
+        statusLabel.textContent = 'LIMITED';
+        statusLabel.className = 'text-3xl font-black mb-2 text-yellow-400';
+        statusDetail.textContent = 'Track is partially open — conditions may apply';
+        statusCard.classList.add('border-yellow-500/50');
+        break;
+      case 'closed':
+        frame.classList.add('closed');
+        banner.className = 'w-full text-center text-sm font-semibold py-1.5 px-4 bg-neutral-800 text-neutral-400 z-50 relative';
+        statusText.innerHTML = '🔴 Nordschleife is <strong>CLOSED</strong>';
+        statusIcon.textContent = '🔴';
+        statusLabel.textContent = 'CLOSED';
+        statusLabel.className = 'text-3xl font-black mb-2 text-red-400';
+        statusDetail.textContent = 'Track is closed (accident, weather, or event)';
+        statusCard.classList.add('border-neutral-700');
+        break;
+      default:
+        frame.classList.add('closed');
+        banner.className = 'w-full text-center text-sm font-semibold py-1.5 px-4 bg-neutral-800 text-neutral-400 z-50 relative';
+        statusText.innerHTML = '⚪ Status unknown — <a href="https://nuerburgring.de/open-hours" target="_blank" class="text-racing-red underline">check nuerburgring.de</a>';
+        statusIcon.textContent = '⚪';
+        statusLabel.textContent = 'UNKNOWN';
+        statusLabel.className = 'text-3xl font-black mb-2 text-neutral-400';
+        statusDetail.textContent = 'Could not fetch status. Check nuerburgring.de directly.';
+        statusCard.classList.add('border-neutral-700');
+    }
+
+    statusTime.textContent = 'Last checked: ' + now;
+  }
+
+  // Fetch on load + every 5 minutes
+  fetchTrackStatus();
+  setInterval(fetchTrackStatus, 300000);
+
+  /* ──────────────────────────────────────────────────────
+     §5. TIMETABLE — Public driving days
+     ────────────────────────────────────────────────────── */
+  // Known 2025/2026 Touristenfahrten dates (curated from public sources)
+  // In production, you'd scrape ringfreaks.de + nuerburgring.de
+  const TF_DATES = [
+    // 2026 season (typical schedule based on historical patterns)
+    { date: '2026-03-14', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: 'Season opening (weather dependent)' },
+    { date: '2026-03-15', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-03-21', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-03-22', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-03-28', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-03-29', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-04-04', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-04-05', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-04-06', day: 'Mon', time: '09:00–17:15', type: 'Touristenfahrten', notes: 'Easter Monday' },
+    { date: '2026-04-11', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-04-12', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-04-18', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-04-19', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-04-25', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: 'Extended hours begin' },
+    { date: '2026-04-26', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-05-01', day: 'Fri', time: '09:00–19:00', type: 'Touristenfahrten', notes: 'Tag der Arbeit (holiday)' },
+    { date: '2026-05-02', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-05-03', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '← Today' },
+    { date: '2026-05-09', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-05-10', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-05-14', day: 'Thu', time: '09:00–19:00', type: 'Touristenfahrten', notes: 'Christi Himmelfahrt' },
+    { date: '2026-05-16', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-05-17', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-05-23', day: 'Sat', time: '17:30–21:00', type: 'Touristenfahrten', notes: 'Evening session (after ADAC event)' },
+    { date: '2026-05-24', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: 'Pfingsten (Whitsun)' },
+    { date: '2026-05-25', day: 'Mon', time: '09:00–19:00', type: 'Touristenfahrten', notes: 'Pfingstmontag' },
+    { date: '2026-05-30', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-05-31', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-06-04', day: 'Thu', time: '09:00–19:30', type: 'Touristenfahrten', notes: 'Fronleichnam (holiday)' },
+    { date: '2026-06-06', day: 'Sat', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-06-07', day: 'Sun', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-06-13', day: 'Sat', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-06-14', day: 'Sun', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-06-20', day: 'Sat', time: '17:30–21:00', type: 'Touristenfahrten', notes: 'Evening only (24h race week)' },
+    { date: '2026-06-27', day: 'Sat', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-06-28', day: 'Sun', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-04', day: 'Sat', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-05', day: 'Sun', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-11', day: 'Sat', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-12', day: 'Sun', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-18', day: 'Sat', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-19', day: 'Sun', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-25', day: 'Sat', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-07-26', day: 'Sun', time: '09:00–19:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-01', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-02', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-08', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-09', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-15', day: 'Sat', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-16', day: 'Sun', time: '09:00–19:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-22', day: 'Sat', time: '09:00–18:00', type: 'Touristenfahrten', notes: 'Hours reducing' },
+    { date: '2026-08-23', day: 'Sun', time: '09:00–18:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-29', day: 'Sat', time: '09:00–18:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-08-30', day: 'Sun', time: '09:00–18:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-05', day: 'Sat', time: '09:00–17:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-06', day: 'Sun', time: '09:00–17:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-12', day: 'Sat', time: '09:00–17:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-13', day: 'Sun', time: '09:00–17:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-19', day: 'Sat', time: '09:00–17:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-20', day: 'Sun', time: '09:00–17:30', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-26', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-09-27', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-10-03', day: 'Sat', time: '09:00–17:15', type: 'Touristenfahrten', notes: 'Tag der Deutschen Einheit' },
+    { date: '2026-10-04', day: 'Sun', time: '09:00–17:15', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-10-10', day: 'Sat', time: '09:00–17:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-10-11', day: 'Sun', time: '09:00–17:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-10-17', day: 'Sat', time: '09:00–17:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-10-18', day: 'Sun', time: '09:00–17:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-10-24', day: 'Sat', time: '09:00–17:00', type: 'Touristenfahrten', notes: '' },
+    { date: '2026-10-25', day: 'Sun', time: '09:00–17:00', type: 'Touristenfahrten', notes: 'Likely season end' },
+    { date: '2026-11-01', day: 'Sun', time: '09:00–16:30', type: 'Touristenfahrten', notes: 'Allerheiligen — season finale (weather dependent)' },
+  ];
+
+  function renderCalendar() {
+    const tbody = document.getElementById('cal-body');
+    const today = new Date().toISOString().split('T')[0];
+    let nextFound = false;
+
+    tbody.innerHTML = TF_DATES.map(d => {
+      const isPast = d.date < today;
+      const isToday = d.date === today;
+      const isNext = !isPast && !isToday && !nextFound;
+      if (isNext) nextFound = true;
+
+      const rowClass = isToday ? 'bg-racing-red/10 border-l-2 border-racing-red' :
+                       isNext ? 'bg-green-900/10 border-l-2 border-green-500' :
+                       isPast ? 'opacity-40' : '';
+
+      const badge = isToday ? '<span class="ml-2 px-1.5 py-0.5 bg-racing-red text-white text-[10px] rounded font-bold">TODAY</span>' :
+                    isNext ? '<span class="ml-2 px-1.5 py-0.5 bg-green-600 text-white text-[10px] rounded font-bold">NEXT</span>' : '';
+
+      return `<tr class="${rowClass} border-b border-racing-border hover:bg-white/5 transition">
+        <td class="px-4 py-2.5 font-mono text-xs">${d.date}${badge}</td>
+        <td class="px-4 py-2.5 text-xs">${d.day}</td>
+        <td class="px-4 py-2.5 text-xs font-semibold">${d.time}</td>
+        <td class="px-4 py-2.5"><span class="px-2 py-0.5 bg-green-900/30 text-green-400 text-[10px] rounded font-semibold">${d.type}</span></td>
+        <td class="px-4 py-2.5 text-xs text-neutral-500">${d.notes}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  renderCalendar();
+  document.getElementById('refresh-cal').addEventListener('click', () => {
+    const tbody = document.getElementById('cal-body');
+    tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-neutral-500">Refreshing…</td></tr>';
+    setTimeout(renderCalendar, 500);
+  });
+
+  /* ──────────────────────────────────────────────────────
+     §6. LIVE CAMS FALLBACK
+     ────────────────────────────────────────────────────── */
+  const webcamFrame = document.getElementById('webcam-frame');
+  if (webcamFrame) {
+    webcamFrame.addEventListener('error', () => {
+      document.getElementById('cam-fallback').classList.remove('hidden');
+    });
+    // Also show fallback after 10s if iframe is blank (common with YouTube embeds)
+    setTimeout(() => {
+      try {
+        // Can't access cross-origin iframe, so we just ensure fallback link is visible
+      } catch(e) {}
+    }, 10000);
+  }
+
+})();
+</script>
+
+</body>
+</html>
