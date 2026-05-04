@@ -1,11 +1,11 @@
 {
   "status": "open",
-  "detail": "Open 08:00\u201319:00 (Green Hell Driving Days powered by Goodyear)",
-  "time": "2026-05-03T23:45:30Z",
+  "detail": "Open 17:00\u201319:30",
+  "time": "2026-05-04T01:21:49Z",
   "periods": [
     {
-      "start": "08:00",
-      "end": "19:00"
+      "start": "17:00",
+      "end": "19:30"
     }
   ]
 }
