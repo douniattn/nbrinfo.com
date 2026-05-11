@@ -1,6 +1,6 @@
 {
-  "status": "closed",
-  "detail": "Closed today",
-  "time": "2026-05-11T14:05:58Z",
+  "status": "unknown",
+  "detail": "Fetch failed",
+  "time": "2026-05-11T16:43:34Z",
   "periods": []
 }
