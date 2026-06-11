@@ -1,6 +1,11 @@
 {
-  "status": "closed",
-  "detail": "Closed today",
-  "time": "2026-06-10T22:56:10Z",
-  "periods": []
+  "status": "open",
+  "detail": "Open 17:30\u201319:30",
+  "time": "2026-06-11T00:15:50Z",
+  "periods": [
+    {
+      "start": "17:30",
+      "end": "19:30"
+    }
+  ]
 }
