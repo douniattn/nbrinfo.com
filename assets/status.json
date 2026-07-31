@@ -1,11 +1,6 @@
 {
-  "status": "open",
-  "detail": "Open 17:00\u201319:30 (NLS Version (Combined Nordschleife & Sprint Track))",
-  "time": "2026-07-30T23:03:40Z",
-  "periods": [
-    {
-      "start": "17:00",
-      "end": "19:30"
-    }
-  ]
+  "status": "closed",
+  "detail": "Closed today",
+  "time": "2026-07-31T00:12:42Z",
+  "periods": []
 }
