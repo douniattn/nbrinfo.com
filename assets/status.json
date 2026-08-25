@@ -1,11 +1,6 @@
 {
-  "status": "open",
-  "detail": "Open 17:30\u201319:30",
-  "time": "2026-08-25T23:10:05Z",
-  "periods": [
-    {
-      "start": "17:30",
-      "end": "19:30"
-    }
-  ]
+  "status": "unknown",
+  "detail": "Could not parse",
+  "time": "2026-08-25T23:36:37Z",
+  "periods": []
 }
