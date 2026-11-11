@@ -1,6 +1,6 @@
 {
-  "status": "closed",
-  "detail": "Closed today",
-  "time": "2026-11-10T20:56:31Z",
+  "status": "unknown",
+  "detail": "Could not parse",
+  "time": "2026-11-11T01:03:43Z",
   "periods": []
 }
